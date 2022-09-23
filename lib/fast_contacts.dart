@@ -134,6 +134,9 @@ class FastContacts {
         const [];
   }
 
+  static Future<bool> requestPermission({bool readonly = false}) async =>
+      await _channel.invokeMethod('requestPermission', readonly) ?? false;
+
   static Future<List<Contact>> get _allContactsAndroid async {
     final specificInfoContacts = await Future.wait([
       _channel.invokeMethod<List>('getContacts', {

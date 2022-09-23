@@ -12,6 +12,12 @@ public class SwiftFastContactsPlugin: NSObject, FlutterPlugin {
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
+        case "requestPermission":
+            DispatchQueue.global(qos: .userInteractive).async {
+                CNContactStore().requestAccess(for: .contacts, completionHandler: { (granted, _) -> Void in
+                    result(granted)
+                })
+            }
         case "getContacts":
             DispatchQueue.global().async {
                 let contacts = self.getContacts()

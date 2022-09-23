@@ -1,5 +1,7 @@
 package com.github.s0nerik.fast_contacts
 
+import android.app.Activity
+import android.content.Context
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.database.Cursor
@@ -21,13 +23,28 @@ import io.flutter.plugin.common.MethodChannel.Result
 import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
-
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import android.content.pm.PackageManager
+import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
+import android.Manifest
 
 /** FastContactsPlugin */
-class FastContactsPlugin : FlutterPlugin, MethodCallHandler, LifecycleOwner, ViewModelStoreOwner {
+class FastContactsPlugin : FlutterPlugin, MethodCallHandler, LifecycleOwner, ViewModelStoreOwner, RequestPermissionsResultListener, ActivityAware {
     private lateinit var channel: MethodChannel
     private lateinit var contentResolver: ContentResolver
     private lateinit var handler: Handler
+    private var activity: Activity? = null
+    private var context: Context? = null
+    private val permissionReadWriteCode: Int = 0
+    private val permissionReadOnlyCode: Int = 1
+    private var permissionResult: Result? = null
+
 
     private val contactsExecutor = ThreadPoolExecutor(
             4, Integer.MAX_VALUE,
@@ -45,11 +62,88 @@ class FastContactsPlugin : FlutterPlugin, MethodCallHandler, LifecycleOwner, Vie
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "com.github.s0nerik.fast_contacts")
         handler = Handler(flutterPluginBinding.applicationContext.mainLooper)
         contentResolver = flutterPluginBinding.applicationContext.contentResolver
+        context = flutterPluginBinding.applicationContext
         channel.setMethodCallHandler(this)
+    }
+
+    // --- ActivityAware implementation ---
+
+    override fun onDetachedFromActivity() { activity = null }
+
+    override fun onDetachedFromActivityForConfigChanges() { activity = null }
+
+    override fun onReattachedToActivityForConfigChanges(@NonNull binding: ActivityPluginBinding) {
+        activity = binding.activity
+        binding.addRequestPermissionsResultListener(this)
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        binding.addRequestPermissionsResultListener(this)
+    }
+
+    // --- RequestPermissionsResultListener implementation ---
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ): Boolean {
+        when (requestCode) {
+            permissionReadWriteCode -> {
+                val granted = grantResults != null &&
+                        grantResults!!.size == 2 &&
+                        grantResults!![0] == PackageManager.PERMISSION_GRANTED &&
+                        grantResults!![1] == PackageManager.PERMISSION_GRANTED
+                if (permissionResult != null) {
+                    GlobalScope.launch(Dispatchers.Main) {
+                        permissionResult!!.success(granted)
+                        permissionResult = null
+                    }
+                }
+                return true
+            }
+            permissionReadOnlyCode -> {
+                val granted = grantResults != null &&
+                        grantResults!!.size == 1 &&
+                        grantResults!![0] == PackageManager.PERMISSION_GRANTED
+                if (permissionResult != null) {
+                    GlobalScope.launch(Dispatchers.Main) {
+                        permissionResult!!.success(granted)
+                        permissionResult = null
+                    }
+                }
+                return true
+            }
+        }
+        return false // did not handle the result
     }
 
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
         when (call.method) {
+            // Requests permission to read/write contacts.
+            "requestPermission" ->
+                GlobalScope.launch(Dispatchers.IO) {
+                    if (context == null) {
+                        GlobalScope.launch(Dispatchers.Main) { result.success(false); }
+                    } else {
+                        val readonly = call.arguments as Boolean
+                        val readPermission = Manifest.permission.READ_CONTACTS
+                        val writePermission = Manifest.permission.WRITE_CONTACTS
+                        if (ContextCompat.checkSelfPermission(context!!, readPermission) == PackageManager.PERMISSION_GRANTED &&
+                            (readonly || ContextCompat.checkSelfPermission(context!!, writePermission) == PackageManager.PERMISSION_GRANTED)
+                        ) {
+                            GlobalScope.launch(Dispatchers.Main) { result.success(true) }
+                        } else if (activity != null) {
+                            permissionResult = result
+                            if (readonly) {
+                                ActivityCompat.requestPermissions(activity!!, arrayOf(readPermission), permissionReadOnlyCode)
+                            } else {
+                                ActivityCompat.requestPermissions(activity!!, arrayOf(readPermission, writePermission), permissionReadWriteCode)
+                            }
+                        }
+                    }
+                }
             "getContacts" -> {
                 val args = call.arguments as Map<String, String>
                 val type = args["type"]
