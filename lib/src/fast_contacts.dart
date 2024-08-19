@@ -99,6 +99,9 @@ class FastContacts {
     }
   }
 
+  static Future<bool> requestPermission({bool readonly = false}) async =>
+      await _channel.invokeMethod('requestPermission', readonly) ?? false;
+
   /// Returns an image of the contact with the given [contactId].
   ///
   /// [size] specifies the size of the image. By default, a thumbnail is returned.

@@ -164,6 +164,12 @@ public class SwiftFastContactsPlugin: NSObject, FlutterPlugin {
                     }
                 }
             }
+        case "requestPermission":
+                    DispatchQueue.global(qos: .userInteractive).async {
+                        CNContactStore().requestAccess(for: .contacts, completionHandler: { (granted, _) -> Void in
+                            result(granted)
+                        })
+                    }
         default:
             result(FlutterMethodNotImplemented)
         }
